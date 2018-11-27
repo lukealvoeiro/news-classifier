@@ -19,9 +19,7 @@ NUM_WORDS = 10000
 
 """
 TODO: 
-- Padding on input texts (find max length of input string (in terms of # of words), pad by this.)
 - Deal with two inputs (headline and description)
-
 """
 
 
@@ -83,8 +81,46 @@ def datasetBuilder():
 
     tokenizer = Tokenizer(num_words=NUM_WORDS)
     tokenizer.fit_on_texts(df["short_description"].tolist() + df["headline"].tolist())
-    sequences_headline = tokenizer.texts_to_sequences(df['headline'])
-    sequences_description = tokenizer.texts_to_sequences(df['short_description'])
+    data_headline = pad_sequences(tokenizer.texts_to_sequences(df['headline']), maxlen=19) # max sequence size of 19
+    data_description = pad_sequences(tokenizer.texts_to_sequences(df['short_description']), maxlen=123) # max sequence size of 123
+
+def getGloveEmbeddings():
+    embeddings_index = dict()
+    with open('glove.6B.100d.txt') as f:
+        for line in f:
+            values = line.split()
+            word = values[0]
+            coefs = np.asarray(values[1:], dtype='float32')
+            embeddings_index[word] = coefs
+    return embeddings_index
+
+def createEmbeddingMatrix(tokenizer, embeddings_index):
+    embedding_matrix = np.zeros((NUM_WORDS, 100))
+    for word, index in tokenizer.word_index.items():
+        if index > NUM_WORDS - 1:
+            break
+        else:
+            embedding_vector = embeddings_index.get(word)
+            if embedding_vector is not None:
+                embedding_matrix[index] = embedding_vector
+    return embedding_matrix
+
+def cleanText(text, table, stem=False):
+    text = text.translate(table)
+    text = text.lower().split()
+    # Remove stop words
+    stops = set(stopwords.words("english"))
+    text = [w for w in text if not w in stops and len(w) >= 3]
+    # Clean text
+    if(stem):
+        stemmer = SnowballStemmer('english')
+        text = [stemmer.stem(word) for word in text]
+    return " ".join(text)
+
+
+main()
+
+
     
 
 # def buildBaseDataset(vocab, news_types):
@@ -100,27 +136,3 @@ def datasetBuilder():
 #             entry = [cleanText(description, translation_table), cleanText(headline, translation_table), news_types[category]]
 #             dataset.append(entry)
 #     return dataset
-
-def getGloveEmbeddings():
-    embeddings_index = dict()
-    with open('glove.6B.100d.txt') as f:
-        for line in f:
-            values = line.split()
-            word = values[0]
-            coefs = np.asarray(values[1:], dtype='float32')
-            embeddings_index[word] = coefs
-    return embeddings_index
-
-def cleanText(text, table, stem=False):
-    text = text.translate(table)
-    text = text.lower().split()
-    # Remove stop words
-    stops = set(stopwords.words("english"))
-    text = [w for w in text if not w in stops and len(w) >= 3]
-    # Clean text
-    if(stem):
-        stemmer = SnowballStemmer('english')
-        text = [stemmer.stem(word) for word in text]
-    return " ".join(text)
-
-main()
