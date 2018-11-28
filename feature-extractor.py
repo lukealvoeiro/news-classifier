@@ -11,11 +11,15 @@ from keras.preprocessing.sequence import pad_sequences
 from keras.models import Sequential
 from keras.layers import Dense, Flatten, LSTM, Conv1D, MaxPooling1D, Dropout, Activation
 from keras.layers.embeddings import Embedding
+from keras.optimizers import SGD
 
 from nltk.stem.snowball import SnowballStemmer
 from nltk.corpus import stopwords
 
+import pickle
+
 NUM_WORDS = 10000
+NUM_CATEGORIES = 31
 
 """
 TODO: 
@@ -24,13 +28,56 @@ TODO:
 
 
 def main():
-    datasetBuilder()
-    # news_types = readNewsTypes()
-    # vocab, inverse_vocab = getVocab()
-    # print(vocab)
-    # base_dataset = buildBaseDataset(vocab, news_types)
-    # print(base_dataset[0])
-    # getGloveEmbeddings()
+    # RUN ONCE - creates files so they don't have to be recreated every run
+    """
+    #create dataset in pandas dataframe
+    df = datasetBuilder()
+    with open('df.pd', 'wb') as data:
+        pickle.dump(df, data)
+    
+    with open('df.pd', 'rb') as data:
+        df = pickle.load(data)
+
+
+    tokenizer = Tokenizer(num_words=NUM_WORDS)
+    tokenizer.fit_on_texts(df["short_description"].tolist() + df["headline"].tolist())
+    data_headline = pad_sequences(tokenizer.texts_to_sequences(df['headline']), maxlen=19) # max sequence size of 19
+    data_description = pad_sequences(tokenizer.texts_to_sequences(df['short_description']), maxlen=123) # max sequence size of 123
+
+    embeddings_matrix = createEmbeddingMatrix(tokenizer, getGloveEmbeddings())
+
+
+    with open('headlines', 'wb') as headlines:
+        pickle.dump(data_headline, headlines)
+    with open('descriptions', 'wb') as descriptions:
+        pickle.dump(data_description, descriptions)
+    with open('emb_matrix', 'wb') as emb_matrix:
+        pickle.dump(embeddings_matrix, emb_matrix)
+    """
+    
+    with open('df.pd', 'rb') as data:
+        df = pickle.load(data)
+    with open('headlines', 'rb') as headlines:
+        data_headline = pickle.load(headlines)
+    with open('descriptions', 'rb') as descriptions:
+        data_description = pickle.load(descriptions)
+    with open('emb_matrix', 'rb') as emb_matrix:
+        embeddings_matrix = pickle.load(emb_matrix)
+
+    ## Get output array
+    cats = np.array(df['category'])
+    y = np.zeros((len(cats), NUM_CATEGORIES))
+    for i, ex in enumerate(cats):
+        y[i][ex] = 1
+    
+    # Build model
+    model = Sequential()
+    model.add(Dense(500, input_dim=19, activation='relu'))
+    model.add(Dense(NUM_CATEGORIES))
+    sgd = SGD(lr=3)
+    model.compile(loss='binary_crossentropy', optimizer=sgd, metrics=['accuracy'])
+    model.fit(data_headline, y, validation_split=0.4, epochs = 3)
+    
 
 def readNewsTypes(categories):
     news_types = set(categories)
@@ -79,10 +126,7 @@ def datasetBuilder():
     df["short_description"] = df["short_description"].map(lambda x: cleanText(x, translation_table))
     df["headline"] = df["headline"].map(lambda x: cleanText(x, translation_table))
 
-    tokenizer = Tokenizer(num_words=NUM_WORDS)
-    tokenizer.fit_on_texts(df["short_description"].tolist() + df["headline"].tolist())
-    data_headline = pad_sequences(tokenizer.texts_to_sequences(df['headline']), maxlen=19) # max sequence size of 19
-    data_description = pad_sequences(tokenizer.texts_to_sequences(df['short_description']), maxlen=123) # max sequence size of 123
+    return df
 
 def getGloveEmbeddings():
     embeddings_index = dict()
