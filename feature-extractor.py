@@ -5,7 +5,9 @@ import tensorflow as tf
 import numpy as np
 import string
 import pandas as pd
+from math import floor
 
+from sklearn.model_selection import train_test_split
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
 from keras.models import Sequential
@@ -18,9 +20,13 @@ from nltk.corpus import stopwords
 
 import pickle
 
+import matplotlib
+matplotlib.use("TkAgg")
+from matplotlib import pyplot as plt
+
 NUM_WORDS = 10000
 NUM_CATEGORIES = 31
-
+TRAIN_SET = 0.7
 """
 TODO: 
 - Deal with two inputs (headline and description)
@@ -28,56 +34,109 @@ TODO:
 
 
 def main():
-    # RUN ONCE - creates files so they don't have to be recreated every run
+    # Validation Accuracies: Headlines - 0.9703, Headlines+Desc - 0.9700, Desc - 0.9681
+    # 0.9707 - Val split 0.4, 150 neurons, 0.2 dropout, lr=3
+    
     """
+    # RUN ONCE - creates files so they don't have to be recreated every run
+    
     #create dataset in pandas dataframe
     df = datasetBuilder()
     with open('df.pd', 'wb') as data:
         pickle.dump(df, data)
-    
-    with open('df.pd', 'rb') as data:
-        df = pickle.load(data)
 
-
+    # create tokenized word sequence
     tokenizer = Tokenizer(num_words=NUM_WORDS)
     tokenizer.fit_on_texts(df["short_description"].tolist() + df["headline"].tolist())
     data_headline = pad_sequences(tokenizer.texts_to_sequences(df['headline']), maxlen=19) # max sequence size of 19
     data_description = pad_sequences(tokenizer.texts_to_sequences(df['short_description']), maxlen=123) # max sequence size of 123
-
+    data_all = pad_sequences(tokenizer.texts_to_sequences(df['short_description'] + df['headline']), maxlen=142)
     embeddings_matrix = createEmbeddingMatrix(tokenizer, getGloveEmbeddings())
 
-
+    # save large objects as files 
     with open('headlines', 'wb') as headlines:
         pickle.dump(data_headline, headlines)
     with open('descriptions', 'wb') as descriptions:
         pickle.dump(data_description, descriptions)
     with open('emb_matrix', 'wb') as emb_matrix:
         pickle.dump(embeddings_matrix, emb_matrix)
+    with open('data_all', 'wb') as all:
+        pickle.dump(data_all, all)
+
+    # count blank headlines - 37
+    count=0
+    for i in df['headline']:
+        if i == "":
+            count += 1
+    print('count=', count)
     """
-    
+    # load saved files
     with open('df.pd', 'rb') as data:
         df = pickle.load(data)
+    with open('data_all', 'rb') as data_all:
+        data = pickle.load(data_all)
     with open('headlines', 'rb') as headlines:
         data_headline = pickle.load(headlines)
     with open('descriptions', 'rb') as descriptions:
         data_description = pickle.load(descriptions)
     with open('emb_matrix', 'rb') as emb_matrix:
         embeddings_matrix = pickle.load(emb_matrix)
-
+    
     ## Get output array
     cats = np.array(df['category'])
     y = np.zeros((len(cats), NUM_CATEGORIES))
     for i, ex in enumerate(cats):
         y[i][ex] = 1
     
+    # split off test set
+    X_train, X_test, y_train, y_test = train_test_split(data, y, test_size = 0.15)  
     # Build model
     model = Sequential()
-    model.add(Dense(500, input_dim=19, activation='relu'))
-    model.add(Dense(NUM_CATEGORIES))
-    sgd = SGD(lr=3)
-    model.compile(loss='binary_crossentropy', optimizer=sgd, metrics=['accuracy'])
-    model.fit(data_headline, y, validation_split=0.4, epochs = 3)
+    model.add(Embedding(input_dim=NUM_WORDS, output_dim=100, input_length=142, weights=[embeddings_matrix], trainable=False))
     
+    model.add(Conv(64, 3, input_shape=(142, 100), activation='relu'))
+    model.add(MaxPooling1D(pool_size=4))
+    model.add(Dropout(0.4))
+    
+    model.add(Conv2D(32, 3, activation='relu'))
+    model.add(MaxPooling1D(pool_size=4))
+    model.add(Dropout(0.4))
+    
+    model.add(Conv2D(16, 3, activation='relu'))
+    model.add(MaxPooling1D(pool_size=4))
+    model.add(Dropout(0.4))
+    
+    model.add(LSTM(100))    
+    
+    model.add(Dense(NUM_CATEGORIES, activation='softmax'))
+    # sgd = SGD(lr=3)
+    #model.compile(loss='binary_crossentropy', optimizer=sgd, metrics=['accuracy'])
+    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=['categorical_accuracy'])
+
+    history = model.fit(X_train, y_train, validation_split=0.2, epochs = 3, batch_size=10, shuffle=True)
+    #model.summary()
+
+    print(model.evaluate(X_test, y_test))
+
+
+
+    #     # summarize history for accuracy
+    # plt.plot(history.history['acc'])
+    # plt.plot(history.history['val_acc'])
+    # plt.title('model accuracy')
+    # plt.ylabel('accuracy')
+    # plt.xlabel('epoch')
+    # plt.legend(['train', 'test'], loc='upper left')
+    # plt.show()
+    # # summarize history for loss
+    # plt.plot(history.history['loss'])
+    # plt.plot(history.history['val_loss'])
+    # plt.title('model loss')
+    # plt.ylabel('loss')
+    # plt.xlabel('epoch')
+    # plt.legend(['train', 'test'], loc='upper left')
+    # plt.show()
+        
 
 def readNewsTypes(categories):
     news_types = set(categories)
